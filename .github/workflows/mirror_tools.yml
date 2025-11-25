@@ -44,12 +44,13 @@ jobs:
             Automated mirror of helper tools.
             
             **Contents:**
-            - `warp_endpoint`: Cloudflare IP Scanner (Shell Script)
-            - `warp_plus_linux_amd64`: Traffic Generator for x86_64
-            - `warp_plus_linux_arm64`: Traffic Generator for ARM64
+            - `warp_endpoint`: Cloudflare IP Scanner
+            - `warp_plus_linux_amd64`: Traffic Generator (x86_64)
+            - `warp_plus_linux_arm64`: Traffic Generator (ARM64)
             
             Synced on: $(date +%Y-%m-%d)
+          
           make_latest: false
-          allow_updates: true
+          
           files: |
             dist/*
