@@ -18,7 +18,7 @@ PLAIN='\033[0m'
 
 # --- [關鍵配置] ---
 REPO_WARP_GO="https://github.com/Yat-Muk/warp-go-build/releases/download/v1.0.8"
-REPO_WGCF="https://github.com/Yat-Muk/warp-go-build/releases/latest/download"
+REPO_WGCF="https://github.com/Yat-Muk/warp-go-build/releases/download/wgcf-latest"
 REPO_TOOLS="https://github.com/Yat-Muk/warp-go-build/releases/download/tools-latest"
 SCRIPT_URL="https://raw.githubusercontent.com/Yat-Muk/CFwarp-Pro/master/CFwarp_Ultimate.sh"
 
@@ -444,7 +444,7 @@ menu() {
     echo -e "${YELLOW}高級工具與維護${PLAIN}"
     echo -e "  8. 優選 Endpoint IP (優化速度)"
     echo -e "  9. 賬戶管理 (刷流量 / 升級 Teams)"
-    echo -e " 10. 媒體解鎖檢測 (Netflix/ChatGPT)"
+    echo -e " 10. 媒體解鎖檢測 (Netflix/ChatGPT) ${YELLOW}[手動]${PLAIN}"
     echo -e " 11. 暫停 / 開啟服務"
     echo -e " 12. 徹底卸載"
     echo -e "  0. 退出"
