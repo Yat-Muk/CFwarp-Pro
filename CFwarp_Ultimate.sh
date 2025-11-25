@@ -22,10 +22,8 @@ REPO_WGCF="https://github.com/Yat-Muk/warp-go-build/releases/download/wgcf-lates
 REPO_TOOLS="https://github.com/Yat-Muk/warp-go-build/releases/download/tools-latest"
 SCRIPT_URL="https://raw.githubusercontent.com/Yat-Muk/CFwarp-Pro/master/CFwarp_Ultimate.sh"
 
-# 本地路徑
 PATH_SCRIPT="/usr/local/bin/CFwarp_Ultimate.sh"
 PATH_SHORTCUT="/usr/bin/cf"
-
 PATH_WARP_GO="/usr/local/bin/warp-go"
 PATH_WGCF="/usr/local/bin/wgcf"
 PATH_WARP_PLUS="/usr/local/bin/warp_plus"
@@ -50,66 +48,35 @@ check_root() {
 }
 
 detect_system() {
-    if [[ -f /etc/redhat-release ]]; then
-        PM="yum"
-    elif grep -q -E -i "debian|ubuntu" /etc/issue; then
-        PM="apt"
-    else
-        PM="apt"
-    fi
-
+    if [[ -f /etc/redhat-release ]]; then PM="yum"; else PM="apt"; fi
     ARCH=$(uname -m)
     case "$ARCH" in
-        x86_64) 
-            BIN_WARP_GO="warp-go_linux_amd64"
-            BIN_WGCF="wgcf_linux_amd64"
-            BIN_WARP_PLUS="warp_plus_linux_amd64"
-            ;;
-        aarch64) 
-            BIN_WARP_GO="warp-go_linux_arm64"
-            BIN_WGCF="wgcf_linux_arm64" 
-            BIN_WARP_PLUS="warp_plus_linux_arm64"
-            ;;
-        *) 
-            log_error "不支持的架構: $ARCH" 
-            ;;
+        x86_64) BIN_WARP_GO="warp-go_linux_amd64"; BIN_WGCF="wgcf_linux_amd64"; BIN_WARP_PLUS="warp_plus_linux_amd64";;
+        aarch64) BIN_WARP_GO="warp-go_linux_arm64"; BIN_WGCF="wgcf_linux_arm64"; BIN_WARP_PLUS="warp_plus_linux_arm64";;
+        *) log_error "不支持的架構: $ARCH" ;;
     esac
 }
 
 check_dependencies() {
     local missing_deps=""
     local required_cmds=("curl" "wget" "tar" "bc" "sed" "grep" "gawk" "netstat" "qrencode" "fping")
-    
     for cmd in "${required_cmds[@]}"; do
-        if ! command -v "$cmd" &> /dev/null; then
-            missing_deps="$missing_deps $cmd"
-        fi
+        if ! command -v "$cmd" &> /dev/null; then missing_deps="$missing_deps $cmd"; fi
     done
-
     if [[ -n "$missing_deps" ]]; then
-        log_warn "檢測到缺失依賴: $missing_deps，正在自動安裝..."
+        log_warn "正在安裝依賴: $missing_deps ..."
         if [[ "$PM" == "yum" ]]; then
-            yum install -y epel-release
-            yum install -y $missing_deps wireguard-tools iproute
+            yum install -y epel-release && yum install -y $missing_deps wireguard-tools iproute
         else
-            apt-get update
-            apt-get install -y $missing_deps wireguard-tools iproute2 lsb-release gnupg net-tools
+            apt-get update && apt-get install -y $missing_deps wireguard-tools iproute2 lsb-release gnupg net-tools
         fi
     fi
 }
 
-# 安裝快捷指令
 install_shortcut() {
-    # 1. 檢測腳本本體
-    if [[ -s "$PATH_SCRIPT" ]]; then
-        chmod +x "$PATH_SCRIPT"
-    else
-        # 文件不存在，執行下載
-        wget -q -O "$PATH_SCRIPT" "$SCRIPT_URL" || log_error "腳本下載失敗，請檢查網絡。"
-        chmod +x "$PATH_SCRIPT"
+    if [[ ! -s "$PATH_SCRIPT" ]]; then
+        wget -q -O "$PATH_SCRIPT" "$SCRIPT_URL" && chmod +x "$PATH_SCRIPT"
     fi
-
-    # 2. 創建快捷鏈接
     cat > "$PATH_SHORTCUT" <<EOF
 #!/bin/bash
 bash $PATH_SCRIPT "\$@"
@@ -125,60 +92,31 @@ enable_tun() {
     fi
 }
 
-# [核心優化] 智能下載函數 (Smart Download)
 download_file() {
     local filename="$1"
     local dest="$2"
     local base_url="$3"
     local url="${base_url}/${filename}"
     local sha_url="${url}.sha256"
-    local perform_download=true
 
-    log_info "正在檢查: ${filename} ..."
+    log_info "下載: ${filename} ..."
+    wget -q --show-progress -O "$dest" "$url" || log_error "下載失敗: $url"
+    
+    if grep -q "<!DOCTYPE html>" "$dest"; then
+        rm -f "$dest"
+        log_error "下載錯誤：文件不存在 (404)。請檢查 GitHub Release。"
+    fi
 
-    # 1. 下載校驗文件 (極小)
     if wget -q -O "/tmp/checksum.tmp" "$sha_url"; then
         local expected=$(awk '{print $1}' /tmp/checksum.tmp)
-        
-        # 2. 如果本地文件存在，計算本地 Hash
-        if [[ -f "$dest" ]]; then
-            local actual=$(sha256sum "$dest" | awk '{print $1}')
-            if [[ "$expected" == "$actual" ]]; then
-                log_info "文件已存在且版本最新，跳過下載。"
-                perform_download=false
-            else
-                log_warn "檢測到新版本或文件損壞，準備更新..."
-            fi
-        fi
-    else
-        log_warn "無法獲取校驗文件，將嘗試強制下載二進制文件..."
-    fi
-
-    # 3. 執行下載
-    if $perform_download; then
-        wget -q --show-progress -O "$dest" "$url" || log_error "下載失敗: $url"
-        
-        # 404 檢查
-        if grep -q "<!DOCTYPE html>" "$dest"; then
+        local actual=$(sha256sum "$dest" | awk '{print $1}')
+        if [[ "$expected" != "$actual" ]]; then
             rm -f "$dest"
-            log_error "下載錯誤：文件不存在 (404)。請檢查 GitHub Release。"
+            log_error "文件校驗失敗！"
         fi
-
-        # 下載後再次校驗
-        if [[ -f "/tmp/checksum.tmp" ]]; then
-            local expected=$(awk '{print $1}' /tmp/checksum.tmp)
-            local actual=$(sha256sum "$dest" | awk '{print $1}')
-            if [[ "$expected" != "$actual" ]]; then
-                rm -f "$dest"
-                log_error "新下載文件校驗失敗！"
-            else
-                log_info "校驗通過。"
-            fi
-        fi
+        rm -f "/tmp/checksum.tmp"
     fi
-    
     chmod +x "$dest"
-    rm -f "/tmp/checksum.tmp"
 }
 
 # --- 3. 狀態檢測 ---
@@ -195,14 +133,12 @@ show_status_panel() {
     else
         echo -e " IPv4: ${RED}無連接${PLAIN}"
     fi
-    
     if [[ -n "$v6" ]]; then
         local loc=$(curl -s6m2 http://ip-api.com/json/$v6?lang=zh-CN -k | grep '"country":' | cut -d'"' -f4)
         echo -e " IPv6: ${GREEN}$v6${PLAIN} ($loc)"
     else
         echo -e " IPv6: ${RED}無連接${PLAIN}"
     fi
-
     local s_run="${RED}未運行${PLAIN}"
     [[ "$warp_status" =~ on|plus ]] && s_run="${GREEN}運行中 ($warp_status)${PLAIN}"
     echo -e " WARP: $s_run"
@@ -216,7 +152,6 @@ check_streaming_unlock() {
     run_check() {
         local type="$1"
         echo -e "\n${YELLOW}[IPv${type} 檢測]${PLAIN}"
-        
         local nf="${RED}失敗${PLAIN}"
         local code=$(curl -${type}fsL -A "$ua" -w "%{http_code}" -o /dev/null -m 5 "https://www.netflix.com/title/70143836" 2>/dev/null)
         case "$code" in
@@ -224,20 +159,16 @@ check_streaming_unlock() {
             404) nf="${YELLOW}僅自製劇${PLAIN}" ;;
             403) nf="${RED}無權限${PLAIN}" ;;
         esac
-
         local gpt="${RED}失敗${PLAIN}"
         local gpt_ret=$(curl -${type}fsL -A "$ua" -m 5 "https://ios.chat.openai.com/public-api/mobile/server_status/v1" 2>/dev/null)
         if [[ "$gpt_ret" == *'"status":"normal"'* ]]; then gpt="${GREEN}完整解鎖${PLAIN}";
         elif [[ -n "$gpt_ret" ]]; then gpt="${YELLOW}僅 Web${PLAIN}"; fi
-
         echo -e " Netflix: $nf | ChatGPT: $gpt"
     }
-
     local v4=$(curl -s4m1 https://ip.gs -k)
     [[ -n "$v4" ]] && run_check 4
     local v6=$(curl -s6m1 https://ip.gs -k)
     [[ -n "$v6" ]] && run_check 6
-    
     echo -e "\n按回車鍵返回菜單..."
     read
     menu
@@ -297,6 +228,7 @@ install_warp_go() {
     uninstall_all_silent
     download_file "$BIN_WARP_GO" "$PATH_WARP_GO" "$REPO_WARP_GO"
     
+    # 強制重置為默認 IPv4 Endpoint
     if [[ ! -f "$CONF_WARP_GO" ]]; then
         log_info "註冊 WARP-GO..."
         mkdir -p $(dirname "$CONF_WARP_GO")
@@ -308,6 +240,9 @@ AllowedIPs = 0.0.0.0/0
 KeepAlive = 30
 EOF
         "$PATH_WARP_GO" --register --config="$CONF_WARP_GO" || log_warn "註冊失敗，請檢查網絡。"
+    else
+        # 如果配置文件已存在，強制修正 Endpoint 格式
+        sed -i "s/Endpoint = .*/Endpoint = 162.159.192.1:2408/" "$CONF_WARP_GO"
     fi
     
     local mode=$1
@@ -317,10 +252,7 @@ EOF
         "ipv6") ips="::/0" ;;
         "dual") ips="0.0.0.0/0,::/0" ;;
     esac
-    
-    if [[ -f "$CONF_WARP_GO" ]]; then
-        sed -i "s#AllowedIPs = .*#AllowedIPs = $ips#g" "$CONF_WARP_GO"
-    fi
+    sed -i "s#AllowedIPs = .*#AllowedIPs = $ips#g" "$CONF_WARP_GO"
     
     cat > "/etc/systemd/system/${SVC_GO}.service" <<EOF
 [Unit]
@@ -404,6 +336,13 @@ optimize_endpoint() {
     
     readp "輸入優選 Endpoint IP:Port (留空不修改): " new_ep
     if [[ -n "$new_ep" ]]; then
+        if [[ "$new_ep" == *:* ]] && [[ "$new_ep" != \[* ]]; then
+             colon_count=$(echo "$new_ep" | grep -o ":" | wc -l)
+             if [[ "$colon_count" -gt 2 ]]; then
+                 log_warn "檢測到 IPv6 地址。請確保格式為 [IPv6地址]:端口"
+             fi
+        fi
+
         if [[ -f "$CONF_WARP_GO" ]]; then
             sed -i "s/Endpoint = .*/Endpoint = $new_ep/" "$CONF_WARP_GO"
             systemctl restart ${SVC_GO}
@@ -478,7 +417,7 @@ menu() {
     echo -e "${YELLOW}高級工具與維護${PLAIN}"
     echo -e "  8. 優選 Endpoint IP (優化速度)"
     echo -e "  9. 賬戶管理 (刷流量 / 升級 Teams)"
-    echo -e " 10. 媒體解鎖檢測 (Netflix/ChatGPT)"
+    echo -e " 10. 媒體解鎖檢測 (Netflix/ChatGPT) ${YELLOW}[手動]${PLAIN}"
     echo -e " 11. 暫停 / 開啟服務"
     echo -e " 12. 徹底卸載"
     echo -e "  0. 退出"
