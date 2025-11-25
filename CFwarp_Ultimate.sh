@@ -1,6 +1,6 @@
 #!/bin/bash
 # ==============================================================================
-# CFwarp Ultimate - Enterprise Edition (Final Gold)
+# CFwarp Ultimate - Enterprise Edition (Fixed v2)
 # ------------------------------------------------------------------------------
 # Repository: https://github.com/Yat-Muk/warp-go-build
 # ==============================================================================
@@ -9,25 +9,22 @@
 export PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin:~/bin
 export LANG=en_US.UTF-8
 
-# 顏色定義
+# 顏色
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
 BLUE='\033[0;36m'
 PLAIN='\033[0m'
 
-# --- [關鍵配置：倉庫源] ---
-# WARP-GO: 鎖定 v1.0.8 穩定版
+# --- [關鍵配置：固定下載源] ---
+# WARP-GO: 鎖定 v1.0.8
 REPO_WARP_GO="https://github.com/Yat-Muk/warp-go-build/releases/download/v1.0.8"
-# WGCF: 始終獲取最新 (Latest)
-REPO_WGCF="https://github.com/Yat-Muk/warp-go-build/releases/latest/download"
-# 工具集: 鎖定工具版本 (tools-latest)
+# WGCF: 鎖定 wgcf-latest
+REPO_WGCF="https://github.com/Yat-Muk/warp-go-build/releases/download/wgcf-latest"
+# 工具: 鎖定 tools-latest
 REPO_TOOLS="https://github.com/Yat-Muk/warp-go-build/releases/download/tools-latest"
 
-# 腳本自身更新地址 (用於安裝到本地)
-SCRIPT_URL="https://raw.githubusercontent.com/Yat-Muk/CFwarp-Pro/main/CFwarp_Ultimate.sh"
-
-# 本地路徑配置
+# 路徑
 PATH_SCRIPT="/usr/local/bin/CFwarp_Ultimate.sh"
 PATH_WARP_GO="/usr/local/bin/warp-go"
 PATH_WGCF="/usr/local/bin/wgcf"
@@ -36,13 +33,12 @@ PATH_ENDPOINT="/usr/local/bin/warp_endpoint"
 CONF_WARP_GO="/usr/local/bin/warp.conf"
 CONF_WGCF="/etc/wireguard/wgcf.conf"
 
-# Systemd 服務名
 SVC_GO="warp-go"
 SVC_WGCF="wg-quick@wgcf"
 SVC_MONITOR="warp-monitor"
 SVC_RESTART="warp-daily-restart"
 
-# --- 2. 基礎工具函數 ---
+# --- 2. 基礎工具 ---
 
 log_info() { echo -e "${GREEN}[INFO] $1${PLAIN}"; }
 log_warn() { echo -e "${YELLOW}[WARN] $1${PLAIN}"; }
@@ -74,48 +70,40 @@ detect_system() {
             BIN_WGCF="wgcf_linux_arm64" 
             BIN_WARP_PLUS="warp_plus_linux_arm64"
             ;;
-        *) 
-            log_error "不支持的架構: $ARCH" 
-            ;;
+        *) log_error "不支持的架構: $ARCH" ;;
     esac
 }
 
-# 智能依賴檢測
-check_dependencies() {
-    local missing_deps=""
-    local required_cmds=("curl" "wget" "tar" "bc" "sed" "grep" "gawk" "netstat" "qrencode" "fping")
-    
-    for cmd in "${required_cmds[@]}"; do
-        if ! command -v "$cmd" &> /dev/null; then
-            missing_deps="$missing_deps $cmd"
-        fi
-    done
-
-    if [[ -n "$missing_deps" ]]; then
-        log_warn "檢測到缺失依賴: $missing_deps，正在自動安裝..."
-        if [[ "$PM" == "yum" ]]; then
-            yum install -y epel-release
-            yum install -y $missing_deps wireguard-tools iproute
-        else
-            apt-get update
-            apt-get install -y $missing_deps wireguard-tools iproute2 lsb-release gnupg net-tools
-        fi
-    fi
-}
-
-# 安裝腳本到本地並創建快捷指令
+# 快捷指令安裝
 install_shortcut() {
-    if [[ ! -s "$PATH_SCRIPT" ]]; then
-        wget -q -O "$PATH_SCRIPT" "$SCRIPT_URL"
-        chmod +x "$PATH_SCRIPT"
-    fi
+    # 直接複製當前運行的腳本到系統路徑，確保內容一致且無需下載
+    cp -f "$0" "$PATH_SCRIPT"
+    chmod +x "$PATH_SCRIPT"
 
-    # 創建 cf 命令
     cat > /usr/bin/cf <<EOF
 #!/bin/bash
 bash $PATH_SCRIPT "\$@"
 EOF
     chmod +x /usr/bin/cf
+}
+
+check_dependencies() {
+    local missing=""
+    local cmds=("curl" "wget" "tar" "bc" "sed" "grep" "gawk" "netstat" "qrencode" "fping")
+    for c in "${cmds[@]}"; do
+        if ! command -v "$c" &> /dev/null; then missing="$missing $c"; fi
+    done
+    
+    if [[ -n "$missing" ]]; then
+        log_warn "安裝依賴: $missing"
+        if [[ "$PM" == "yum" ]]; then
+            yum install -y epel-release
+            yum install -y $missing wireguard-tools iproute
+        else
+            apt-get update
+            apt-get install -y $missing wireguard-tools iproute2 lsb-release gnupg net-tools
+        fi
+    fi
 }
 
 enable_tun() {
@@ -126,6 +114,7 @@ enable_tun() {
     fi
 }
 
+# 增強型下載函數
 download_file() {
     local filename="$1"
     local dest="$2"
@@ -136,21 +125,29 @@ download_file() {
     log_info "下載: ${filename} ..."
     wget -q --show-progress -O "$dest" "$url" || log_error "下載失敗: $url"
     
-    if wget -q -O "/tmp/checksum.tmp" "$sha_url"; then
-        local expected=$(awk '{print $1}' /tmp/checksum.tmp)
+    # 檢查是否下載了 404 頁面
+    if grep -q "<!DOCTYPE html>" "$dest"; then
+        rm -f "$dest"
+        log_error "下載錯誤：文件不存在 (404)。請檢查 GitHub Release 是否構建成功。"
+    fi
+
+    # 校驗
+    if wget -q -O "/tmp/check.sha" "$sha_url"; then
+        local expected=$(awk '{print $1}' /tmp/check.sha)
         local actual=$(sha256sum "$dest" | awk '{print $1}')
         if [[ "$expected" != "$actual" ]]; then
             rm -f "$dest"
-            log_error "文件校驗失敗！請檢查源文件。"
+            log_error "文件校驗失敗！"
         fi
-        rm -f "/tmp/checksum.tmp"
+        rm -f "/tmp/check.sha"
+    else
+        log_warn "未找到校驗文件，跳過校驗。"
     fi
     chmod +x "$dest"
 }
 
-# --- 3. 狀態顯示 (Status Display) ---
+# --- 3. 狀態檢測 ---
 
-# 快速狀態面板 (僅顯示 IP 和 連接狀態)
 show_status_panel() {
     local v4=$(curl -s4m2 https://ip.gs -k)
     local v6=$(curl -s6m2 https://ip.gs -k)
@@ -172,22 +169,19 @@ show_status_panel() {
     fi
 
     local s_run="${RED}未運行${PLAIN}"
-    [[ "$warp_status" == "on" || "$warp_status" == "plus" ]] && s_run="${GREEN}運行中 ($warp_status)${PLAIN}"
+    [[ "$warp_status" =~ on|plus ]] && s_run="${GREEN}運行中 ($warp_status)${PLAIN}"
     echo -e " WARP: $s_run"
     echo -e "${BLUE}---------------------------------------------------------${PLAIN}"
 }
 
-# 深度解鎖檢測 (僅在選擇時運行)
 check_streaming_unlock() {
     echo -e "\n${BLUE}>>> 正在進行媒體解鎖檢測...${PLAIN}"
     local ua="Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
     
-    # 定義檢測函數
     run_check() {
         local type="$1"
         echo -e "\n${YELLOW}[IPv${type} 檢測]${PLAIN}"
         
-        # Netflix
         local nf="${RED}失敗${PLAIN}"
         local code=$(curl -${type}fsL -A "$ua" -w "%{http_code}" -o /dev/null -m 5 "https://www.netflix.com/title/70143836" 2>/dev/null)
         case "$code" in
@@ -196,7 +190,6 @@ check_streaming_unlock() {
             403) nf="${RED}無權限${PLAIN}" ;;
         esac
 
-        # ChatGPT
         local gpt="${RED}失敗${PLAIN}"
         local gpt_ret=$(curl -${type}fsL -A "$ua" -m 5 "https://ios.chat.openai.com/public-api/mobile/server_status/v1" 2>/dev/null)
         if [[ "$gpt_ret" == *'"status":"normal"'* ]]; then gpt="${GREEN}完整解鎖${PLAIN}";
@@ -205,10 +198,8 @@ check_streaming_unlock() {
         echo -e " Netflix: $nf | ChatGPT: $gpt"
     }
 
-    # 雙棧檢測
     local v4=$(curl -s4m1 https://ip.gs -k)
     [[ -n "$v4" ]] && run_check 4
-    
     local v6=$(curl -s6m1 https://ip.gs -k)
     [[ -n "$v6" ]] && run_check 6
     
@@ -217,7 +208,7 @@ check_streaming_unlock() {
     menu
 }
 
-# --- 4. 核心功能安裝 ---
+# --- 4. 安裝邏輯 ---
 
 setup_systemd_monitor() {
     local restart_cmd="$1"
@@ -269,7 +260,6 @@ EOF
 
 install_warp_go() {
     uninstall_all_silent
-    # 使用 REPO_WARP_GO 鎖定版本
     download_file "$BIN_WARP_GO" "$PATH_WARP_GO" "$REPO_WARP_GO"
     
     if [[ ! -f "$CONF_WARP_GO" ]]; then
@@ -282,9 +272,7 @@ Endpoint = 162.159.192.1:2408
 AllowedIPs = 0.0.0.0/0
 KeepAlive = 30
 EOF
-        if ! "$PATH_WARP_GO" --register --config="$CONF_WARP_GO"; then
-            log_error "註冊失敗。請檢查網絡或稍後重試。"
-        fi
+        "$PATH_WARP_GO" --register --config="$CONF_WARP_GO"
     fi
     
     local mode=$1
@@ -294,10 +282,7 @@ EOF
         "ipv6") ips="::/0" ;;
         "dual") ips="0.0.0.0/0,::/0" ;;
     esac
-    
-    if [[ -f "$CONF_WARP_GO" ]]; then
-        sed -i "s#AllowedIPs = .*#AllowedIPs = $ips#g" "$CONF_WARP_GO"
-    fi
+    sed -i "s#AllowedIPs = .*#AllowedIPs = $ips#g" "$CONF_WARP_GO"
     
     cat > "/etc/systemd/system/${SVC_GO}.service" <<EOF
 [Unit]
@@ -323,13 +308,12 @@ EOF
 install_wgcf() {
     uninstall_all_silent
     install_pkg "wireguard-tools"
-    # 使用 REPO_WGCF 獲取最新
     download_file "$BIN_WGCF" "$WGCF_BIN" "$REPO_WGCF"
     
     mkdir -p "$WGCF_DIR"
     cd "$WGCF_DIR" || exit 1
     if [[ ! -f wgcf-account.toml ]]; then
-        log_info "註冊 WGCF..."
+        log_info "註冊 WGCF (可能需要多次嘗試)..."
         yes | "$WGCF_BIN" register
         "$WGCF_BIN" generate
     fi
@@ -375,11 +359,8 @@ install_socks5() {
     menu
 }
 
-# --- 5. 高級工具 ---
-
 optimize_endpoint() {
     log_info "正在運行 Endpoint 優選..."
-    # 使用 REPO_TOOLS
     download_file "$BIN_ENDPOINT" "$PATH_ENDPOINT" "$REPO_TOOLS"
     bash "$PATH_ENDPOINT"
     
@@ -493,9 +474,9 @@ menu() {
 # --- Entry Point ---
 check_root
 detect_system
+install_shortcut
 check_dependencies
 enable_tun
-install_shortcut
 
 if [[ $# == 0 ]]; then
     menu
