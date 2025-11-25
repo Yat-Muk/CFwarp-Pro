@@ -1,8 +1,6 @@
 #!/bin/bash
 # ==============================================================================
 # CFwarp Ultimate - Enterprise Edition
-# ------------------------------------------------------------------------------
-# Repository: https://github.com/Yat-Muk/warp-go-build
 # ==============================================================================
 
 # --- 1. 全局配置 ---
@@ -16,15 +14,21 @@ YELLOW='\033[0;33m'
 BLUE='\033[0;36m'
 PLAIN='\033[0m'
 
-# --- [關鍵配置] ---
+# 1. WARP-GO (Tag: v1.0.8)
 REPO_WARP_GO="https://github.com/Yat-Muk/warp-go-build/releases/download/v1.0.8"
+
+# 2. WGCF (Tag: wgcf-latest)
 REPO_WGCF="https://github.com/Yat-Muk/warp-go-build/releases/download/wgcf-latest"
+
+# 3. 工具集 (Tag: tools-latest)
 REPO_TOOLS="https://github.com/Yat-Muk/warp-go-build/releases/download/tools-latest"
-SCRIPT_URL="https://raw.githubusercontent.com/Yat-Muk/CFwarp-Pro/master/CFwarp_Ultimate.sh"
+
+# 腳本自身更新地址
+SCRIPT_URL="https://raw.githubusercontent.com/Yat-Muk/CFwarp-Pro/main/CFwarp_Ultimate.sh"
 
 # 本地路徑
-PATH_INSTALL="/usr/local/bin/CFwarp_Ultimate.sh" # 腳本實體安裝位置
-PATH_SHORTCUT="/usr/bin/cf"                      # 快捷指令位置
+PATH_SCRIPT="/usr/local/bin/CFwarp_Ultimate.sh"
+PATH_SHORTCUT="/usr/bin/cf"
 
 PATH_WARP_GO="/usr/local/bin/warp-go"
 PATH_WGCF="/usr/local/bin/wgcf"
@@ -61,14 +65,14 @@ detect_system() {
     ARCH=$(uname -m)
     case "$ARCH" in
         x86_64) 
-            F_WARP_GO="warp-go_linux_amd64"
-            F_WGCF="wgcf_linux_amd64"
-            F_WARP_PLUS="warp_plus_linux_amd64"
+            BIN_WARP_GO="warp-go_linux_amd64"
+            BIN_WGCF="wgcf_linux_amd64"
+            BIN_WARP_PLUS="warp_plus_linux_amd64"
             ;;
         aarch64) 
-            F_WARP_GO="warp-go_linux_arm64"
-            F_WGCF="wgcf_linux_arm64" 
-            F_WARP_PLUS="warp_plus_linux_arm64"
+            BIN_WARP_GO="warp-go_linux_arm64"
+            BIN_WGCF="wgcf_linux_arm64" 
+            BIN_WARP_PLUS="warp_plus_linux_arm64"
             ;;
         *) 
             log_error "不支持的架構: $ARCH" 
@@ -79,13 +83,9 @@ detect_system() {
 check_dependencies() {
     local missing_deps=""
     local required_cmds=("curl" "wget" "tar" "bc" "sed" "grep" "gawk" "netstat" "qrencode" "fping")
-    
     for cmd in "${required_cmds[@]}"; do
-        if ! command -v "$cmd" &> /dev/null; then
-            missing_deps="$missing_deps $cmd"
-        fi
+        if ! command -v "$cmd" &> /dev/null; then missing_deps="$missing_deps $cmd"; fi
     done
-
     if [[ -n "$missing_deps" ]]; then
         log_warn "檢測到缺失依賴: $missing_deps，正在自動安裝..."
         if [[ "$PM" == "yum" ]]; then
@@ -98,18 +98,16 @@ check_dependencies() {
     fi
 }
 
-# [核心修復] 安裝快捷指令與腳本自身
 install_shortcut() {
-    # 強制下載完整腳本到系統路徑，避免 pipe 安裝導致的文件殘缺
-    wget -q -O "$PATH_INSTALL" "$SCRIPT_URL" || log_error "腳本安裝失敗：無法連接 GitHub，請檢查網絡或 URL。"
-    chmod +x "$PATH_INSTALL"
-
-    # 創建 cf 快捷指令
-    cat > "$PATH_SHORTCUT" <<EOF
+    # 強制下載完整腳本
+    if wget -q -O "$PATH_SCRIPT" "$SCRIPT_URL"; then
+        chmod +x "$PATH_SCRIPT"
+        cat > "$PATH_SHORTCUT" <<EOF
 #!/bin/bash
-bash $PATH_INSTALL "\$@"
+bash $PATH_SCRIPT "\$@"
 EOF
-    chmod +x "$PATH_SHORTCUT"
+        chmod +x "$PATH_SHORTCUT"
+    fi
 }
 
 enable_tun() {
@@ -120,6 +118,7 @@ enable_tun() {
     fi
 }
 
+# 增強型下載函數
 download_file() {
     local filename="$1"
     local dest="$2"
@@ -127,13 +126,19 @@ download_file() {
     local url="${base_url}/${filename}"
     local sha_url="${url}.sha256"
 
-    log_info "下載: ${filename} ..."
-    wget -q --show-progress -O "$dest" "$url" || log_error "下載失敗: $url"
+    log_info "正在下載: ${filename} ..."
+    # 顯示下載 URL 以便調試
+    # echo "DEBUG: URL=$url" 
     
-    # 檢查是否下載了 404 頁面
+    wget -q --show-progress -O "$dest" "$url" || { 
+        rm -f "$dest"
+        log_error "下載失敗！請檢查：\n1. 倉庫是否為 Public\n2. Release Tag 是否存在\n3. 文件名是否匹配\nURL: $url"
+    }
+    
+    # 404 檢查
     if grep -q "<!DOCTYPE html>" "$dest"; then
         rm -f "$dest"
-        log_error "下載錯誤：文件不存在 (404)。"
+        log_error "下載錯誤：文件不存在 (404)。\n請確認 $url 有效。"
     fi
 
     if wget -q -O "/tmp/checksum.tmp" "$sha_url"; then
@@ -142,13 +147,15 @@ download_file() {
         if [[ "$expected" != "$actual" ]]; then
             rm -f "$dest"
             log_error "文件校驗失敗！"
+        else
+            log_info "校驗通過。"
         fi
         rm -f "/tmp/checksum.tmp"
     fi
     chmod +x "$dest"
 }
 
-# --- 3. 狀態檢測 (Status) ---
+# --- 3. 狀態檢測 ---
 
 show_status_panel() {
     local v4=$(curl -s4m2 https://ip.gs -k)
@@ -210,7 +217,7 @@ check_streaming_unlock() {
     menu
 }
 
-# --- 4. 安裝與功能 ---
+# --- 4. 安裝邏輯 ---
 
 setup_systemd_monitor() {
     local restart_cmd="$1"
@@ -365,7 +372,7 @@ install_socks5() {
 
 optimize_endpoint() {
     log_info "正在運行 Endpoint 優選..."
-    download_file "$BIN_ENDPOINT" "$PATH_ENDPOINT" "$REPO_TOOLS"
+    download_file "warp_endpoint" "$PATH_ENDPOINT" "$REPO_TOOLS"
     bash "$PATH_ENDPOINT"
     
     readp "輸入優選 Endpoint IP:Port (留空不修改): " new_ep
@@ -444,7 +451,7 @@ menu() {
     echo -e "${YELLOW}高級工具與維護${PLAIN}"
     echo -e "  8. 優選 Endpoint IP (優化速度)"
     echo -e "  9. 賬戶管理 (刷流量 / 升級 Teams)"
-    echo -e " 10. 媒體解鎖檢測 (Netflix/ChatGPT) ${YELLOW}[手動]${PLAIN}"
+    echo -e " 10. 媒體解鎖檢測 (Netflix/ChatGPT)"
     echo -e " 11. 暫停 / 開啟服務"
     echo -e " 12. 徹底卸載"
     echo -e "  0. 退出"
