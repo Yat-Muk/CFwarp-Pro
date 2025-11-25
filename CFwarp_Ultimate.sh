@@ -1,6 +1,8 @@
 #!/bin/bash
 # ==============================================================================
 # CFwarp Ultimate - Enterprise Edition
+# ------------------------------------------------------------------------------
+# Repository: https://github.com/Yat-Muk/warp-go-build
 # ==============================================================================
 
 # --- 1. 全局配置 ---
@@ -14,17 +16,11 @@ YELLOW='\033[0;33m'
 BLUE='\033[0;36m'
 PLAIN='\033[0m'
 
-# 1. WARP-GO (Tag: v1.0.8)
+# --- [下載源配置] ---
 REPO_WARP_GO="https://github.com/Yat-Muk/warp-go-build/releases/download/v1.0.8"
-
-# 2. WGCF (Tag: wgcf-latest)
 REPO_WGCF="https://github.com/Yat-Muk/warp-go-build/releases/download/wgcf-latest"
-
-# 3. 工具集 (Tag: tools-latest)
 REPO_TOOLS="https://github.com/Yat-Muk/warp-go-build/releases/download/tools-latest"
-
-# 腳本自身更新地址
-SCRIPT_URL="https://raw.githubusercontent.com/Yat-Muk/CFwarp-Pro/main/CFwarp_Ultimate.sh"
+SCRIPT_URL="https://raw.githubusercontent.com/Yat-Muk/CFwarp-Pro/master/CFwarp_Ultimate.sh"
 
 # 本地路徑
 PATH_SCRIPT="/usr/local/bin/CFwarp_Ultimate.sh"
@@ -83,9 +79,13 @@ detect_system() {
 check_dependencies() {
     local missing_deps=""
     local required_cmds=("curl" "wget" "tar" "bc" "sed" "grep" "gawk" "netstat" "qrencode" "fping")
+    
     for cmd in "${required_cmds[@]}"; do
-        if ! command -v "$cmd" &> /dev/null; then missing_deps="$missing_deps $cmd"; fi
+        if ! command -v "$cmd" &> /dev/null; then
+            missing_deps="$missing_deps $cmd"
+        fi
     done
+
     if [[ -n "$missing_deps" ]]; then
         log_warn "檢測到缺失依賴: $missing_deps，正在自動安裝..."
         if [[ "$PM" == "yum" ]]; then
@@ -98,16 +98,23 @@ check_dependencies() {
     fi
 }
 
+# 安裝快捷指令
 install_shortcut() {
-    # 強制下載完整腳本
-    if wget -q -O "$PATH_SCRIPT" "$SCRIPT_URL"; then
+    # 1. 檢測腳本本體
+    if [[ -s "$PATH_SCRIPT" ]]; then
         chmod +x "$PATH_SCRIPT"
-        cat > "$PATH_SHORTCUT" <<EOF
+    else
+        # 文件不存在，執行下載
+        wget -q -O "$PATH_SCRIPT" "$SCRIPT_URL" || log_error "腳本下載失敗，請檢查網絡。"
+        chmod +x "$PATH_SCRIPT"
+    fi
+
+    # 2. 創建快捷鏈接
+    cat > "$PATH_SHORTCUT" <<EOF
 #!/bin/bash
 bash $PATH_SCRIPT "\$@"
 EOF
-        chmod +x "$PATH_SHORTCUT"
-    fi
+    chmod +x "$PATH_SHORTCUT"
 }
 
 enable_tun() {
@@ -118,41 +125,60 @@ enable_tun() {
     fi
 }
 
-# 增強型下載函數
+# [核心優化] 智能下載函數 (Smart Download)
 download_file() {
     local filename="$1"
     local dest="$2"
     local base_url="$3"
     local url="${base_url}/${filename}"
     local sha_url="${url}.sha256"
+    local perform_download=true
 
-    log_info "正在下載: ${filename} ..."
-    # 顯示下載 URL 以便調試
-    # echo "DEBUG: URL=$url" 
-    
-    wget -q --show-progress -O "$dest" "$url" || { 
-        rm -f "$dest"
-        log_error "下載失敗！請檢查：\n1. 倉庫是否為 Public\n2. Release Tag 是否存在\n3. 文件名是否匹配\nURL: $url"
-    }
-    
-    # 404 檢查
-    if grep -q "<!DOCTYPE html>" "$dest"; then
-        rm -f "$dest"
-        log_error "下載錯誤：文件不存在 (404)。\n請確認 $url 有效。"
-    fi
+    log_info "正在檢查: ${filename} ..."
 
+    # 1. 下載校驗文件 (極小)
     if wget -q -O "/tmp/checksum.tmp" "$sha_url"; then
         local expected=$(awk '{print $1}' /tmp/checksum.tmp)
-        local actual=$(sha256sum "$dest" | awk '{print $1}')
-        if [[ "$expected" != "$actual" ]]; then
-            rm -f "$dest"
-            log_error "文件校驗失敗！"
-        else
-            log_info "校驗通過。"
+        
+        # 2. 如果本地文件存在，計算本地 Hash
+        if [[ -f "$dest" ]]; then
+            local actual=$(sha256sum "$dest" | awk '{print $1}')
+            if [[ "$expected" == "$actual" ]]; then
+                log_info "文件已存在且版本最新，跳過下載。"
+                perform_download=false
+            else
+                log_warn "檢測到新版本或文件損壞，準備更新..."
+            fi
         fi
-        rm -f "/tmp/checksum.tmp"
+    else
+        log_warn "無法獲取校驗文件，將嘗試強制下載二進制文件..."
     fi
+
+    # 3. 執行下載
+    if $perform_download; then
+        wget -q --show-progress -O "$dest" "$url" || log_error "下載失敗: $url"
+        
+        # 404 檢查
+        if grep -q "<!DOCTYPE html>" "$dest"; then
+            rm -f "$dest"
+            log_error "下載錯誤：文件不存在 (404)。請檢查 GitHub Release。"
+        fi
+
+        # 下載後再次校驗
+        if [[ -f "/tmp/checksum.tmp" ]]; then
+            local expected=$(awk '{print $1}' /tmp/checksum.tmp)
+            local actual=$(sha256sum "$dest" | awk '{print $1}')
+            if [[ "$expected" != "$actual" ]]; then
+                rm -f "$dest"
+                log_error "新下載文件校驗失敗！"
+            else
+                log_info "校驗通過。"
+            fi
+        fi
+    fi
+    
     chmod +x "$dest"
+    rm -f "/tmp/checksum.tmp"
 }
 
 # --- 3. 狀態檢測 ---
@@ -291,6 +317,7 @@ EOF
         "ipv6") ips="::/0" ;;
         "dual") ips="0.0.0.0/0,::/0" ;;
     esac
+    
     if [[ -f "$CONF_WARP_GO" ]]; then
         sed -i "s#AllowedIPs = .*#AllowedIPs = $ips#g" "$CONF_WARP_GO"
     fi
@@ -372,7 +399,7 @@ install_socks5() {
 
 optimize_endpoint() {
     log_info "正在運行 Endpoint 優選..."
-    download_file "warp_endpoint" "$PATH_ENDPOINT" "$REPO_TOOLS"
+    download_file "$BIN_ENDPOINT" "$PATH_ENDPOINT" "$REPO_TOOLS"
     bash "$PATH_ENDPOINT"
     
     readp "輸入優選 Endpoint IP:Port (留空不修改): " new_ep
