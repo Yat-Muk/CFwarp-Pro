@@ -13,7 +13,7 @@
 支持 Ubuntu 18+, Debian 10+, CentOS 7+ (AMD64 / ARM64)
 
 ```bash
-bash <(curl -fsSL [https://raw.githubusercontent.com/Yat-Muk/CFwarp-Pro/master/CFwarp_Ultimate.sh](https://raw.githubusercontent.com/Yat-Muk/CFwarp-Pro/master/CFwarp_Ultimate.sh))
+bash <(curl -fsSL https://raw.githubusercontent.com/Yat-Muk/CFwarp-Pro/master/CFwarp_Ultimate.sh)
 ````
 
 *安裝後，可隨時輸入 `cf` 呼出管理菜單。*
