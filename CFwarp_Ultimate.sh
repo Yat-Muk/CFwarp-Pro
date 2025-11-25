@@ -1,37 +1,39 @@
 #!/bin/bash
 # ==============================================================================
-# CFwarp Ultimate - Enterprise Edition
+# CFwarp Ultimate - Enterprise Edition (Optimized)
 # ------------------------------------------------------------------------------
 # Repository: https://github.com/Yat-Muk/warp-go-build
 # ==============================================================================
 
-# --- 1. 全局配置 (Global Config) ---
+# --- 1. 全局配置 ---
 export PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin:~/bin
 export LANG=en_US.UTF-8
 
-# 顏色定義
+# 顏色
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
 BLUE='\033[0;36m'
 PLAIN='\033[0m'
 
-# --- [關鍵配置] 您的自有 GitHub Mirror ---
-# WARP-GO: 鎖定 v1.0.8 穩定版
-REPO_WARP_GO="https://github.com/Yat-Muk/warp-go-build/releases/download/v1.0.8"
-# WGCF: 自動獲取最新版
-REPO_WGCF="https://github.com/Yat-Muk/warp-go-build/releases/latest/download"
-# 工具集: 鎖定 tools-latest (含 IP 優選和刷流量工具)
-REPO_TOOLS="https://github.com/Yat-Muk/warp-go-build/releases/download/tools-latest"
+# 倉庫配置
+REPO_BASE="https://github.com/Yat-Muk/warp-go-build/releases/latest/download"
+# 腳本自身的在線地址 (用於安裝到本地)
+SCRIPT_URL="https://raw.githubusercontent.com/Yat-Muk/CFwarp-Pro/main/CFwarp_Ultimate.sh"
 
-# 系統路徑
-WARP_GO_BIN="/usr/local/bin/warp-go"
-WARP_GO_CONF="/usr/local/bin/warp.conf"
-WGCF_BIN="/usr/local/bin/wgcf"
-WGCF_DIR="/etc/wireguard"
-WGCF_CONF="${WGCF_DIR}/wgcf.conf"
-WARP_PLUS_BIN="/usr/local/bin/warp-plus"
-ENDPOINT_SCRIPT="/usr/local/bin/warp_endpoint"
+# 文件名與路徑
+BIN_WARP_GO="warp-go_linux_amd64"
+BIN_WGCF="wgcf_linux_amd64"
+BIN_WARP_PLUS="warp_plus_linux_amd64"
+BIN_ENDPOINT="warp_endpoint"
+
+PATH_SCRIPT="/usr/local/bin/CFwarp_Ultimate.sh"
+PATH_WARP_GO="/usr/local/bin/warp-go"
+PATH_WGCF="/usr/local/bin/wgcf"
+PATH_WARP_PLUS="/usr/local/bin/warp_plus"
+PATH_ENDPOINT="/usr/local/bin/warp_endpoint"
+CONF_WARP_GO="/usr/local/bin/warp.conf"
+CONF_WGCF="/etc/wireguard/wgcf.conf"
 
 # Systemd 服務名
 SVC_GO="warp-go"
@@ -39,7 +41,7 @@ SVC_WGCF="wg-quick@wgcf"
 SVC_MONITOR="warp-monitor"
 SVC_RESTART="warp-daily-restart"
 
-# --- 2. 基礎工具函數 (Base Utils) ---
+# --- 2. 基礎工具函數 ---
 
 log_info() { echo -e "${GREEN}[INFO] $1${PLAIN}"; }
 log_warn() { echo -e "${YELLOW}[WARN] $1${PLAIN}"; }
@@ -62,14 +64,14 @@ detect_system() {
     ARCH=$(uname -m)
     case "$ARCH" in
         x86_64) 
-            F_WARP_GO="warp-go_linux_amd64"
-            F_WGCF="wgcf_linux_amd64"
-            F_WARP_PLUS="warp_plus_linux_amd64"
+            BIN_WARP_GO="warp-go_linux_amd64"
+            BIN_WGCF="wgcf_linux_amd64"
+            BIN_WARP_PLUS="warp_plus_linux_amd64"
             ;;
         aarch64) 
-            F_WARP_GO="warp-go_linux_arm64"
-            F_WGCF="wgcf_linux_arm64" 
-            F_WARP_PLUS="warp_plus_linux_arm64"
+            BIN_WARP_GO="warp-go_linux_arm64"
+            BIN_WGCF="wgcf_linux_arm64" 
+            BIN_WARP_PLUS="warp_plus_linux_arm64"
             ;;
         *) 
             log_error "不支持的架構: $ARCH" 
@@ -77,22 +79,44 @@ detect_system() {
     esac
 }
 
-install_base_deps() {
-    # 安裝基礎依賴，包含原腳本需要的所有工具
-    local deps=("curl" "wget" "tar" "bc" "sed" "grep" "gawk" "net-tools" "qrencode" "fping")
-    if [[ "$PM" == "yum" ]]; then
-        yum install -y epel-release
-        yum install -y "${deps[@]}" wireguard-tools iproute
-    else
-        apt-get update
-        apt-get install -y "${deps[@]}" wireguard-tools iproute2 lsb-release gnupg
+# 智能依賴檢測
+check_dependencies() {
+    local missing_deps=""
+    # 定義必須的命令列表
+    local required_cmds=("curl" "wget" "tar" "bc" "sed" "grep" "gawk" "netstat" "qrencode" "fping")
+    
+    for cmd in "${required_cmds[@]}"; do
+        if ! command -v "$cmd" &> /dev/null; then
+            missing_deps="$missing_deps $cmd"
+        fi
+    done
+
+    # 如果有缺失的命令，執行安裝
+    if [[ -n "$missing_deps" ]]; then
+        log_warn "檢測到缺失依賴: $missing_deps，正在自動安裝..."
+        if [[ "$PM" == "yum" ]]; then
+            yum install -y epel-release
+            yum install -y $missing_deps wireguard-tools iproute
+        else
+            apt-get update
+            # net-tools 包含 netstat
+            apt-get install -y $missing_deps wireguard-tools iproute2 lsb-release gnupg net-tools
+        fi
     fi
 }
 
-create_shortcut() {
+# 修復快捷指令 (安裝腳本到本地)
+install_shortcut() {
+    # 下載腳本自身到 /usr/local/bin
+    if [[ ! -f "$PATH_SCRIPT" ]]; then
+        wget -q -O "$PATH_SCRIPT" "$SCRIPT_URL"
+        chmod +x "$PATH_SCRIPT"
+    fi
+
+    # 創建 cf 命令
     cat > /usr/bin/cf <<EOF
 #!/bin/bash
-bash <(curl -fsSL https://raw.githubusercontent.com/Yat-Muk/CFwarp-Pro/main/CFwarp_Ultimate.sh) "\$@"
+bash $PATH_SCRIPT "\$@"
 EOF
     chmod +x /usr/bin/cf
 }
@@ -105,117 +129,115 @@ enable_tun() {
     fi
 }
 
-# 通用下載函數 (帶校驗)
 download_file() {
-    local url="$1"
+    local filename="$1"
     local dest="$2"
+    local url="${REPO_BASE}/${filename}"
     local sha_url="${url}.sha256"
-    
-    log_info "正在下載: $(basename "$dest")"
+
+    log_info "下載: ${filename} ..."
     wget -q --show-progress -O "$dest" "$url" || log_error "下載失敗: $url"
     
-    # 嘗試下載校驗文件 (如果存在)
+    # 校驗
     if wget -q -O "/tmp/checksum.tmp" "$sha_url"; then
         local expected=$(awk '{print $1}' /tmp/checksum.tmp)
         local actual=$(sha256sum "$dest" | awk '{print $1}')
         if [[ "$expected" != "$actual" ]]; then
             rm -f "$dest"
-            log_error "文件完整性校驗失敗！請檢查網絡或源倉庫。"
-        else
-            log_info "文件校驗通過。"
+            log_error "文件校驗失敗！"
         fi
         rm -f "/tmp/checksum.tmp"
     fi
     chmod +x "$dest"
 }
 
-# --- 3. 狀態與解鎖檢測 (Status & Unlock Check) ---
-# 復刻原 nf4/nf6/chatgpt 函數邏輯
+# --- 3. 狀態檢測 (Status) ---
 
-check_unlock_status() {
-    local type="$1" # 4 or 6
-    local ua="Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+check_streaming_unlock() {
+    echo -e "\n${BLUE}--- 正在進行媒體解鎖檢測 (請稍候) ---${PLAIN}"
     
-    # Netflix 檢測
-    local nf_status="${RED}檢測失敗${PLAIN}"
+    local ua="Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+    local type="4" # 默認檢測 IPv4，如果只有 v6 則檢測 v6
+    [[ -z $(curl -s4m2 https://ip.gs -k) ]] && type="6"
+
+    # Netflix
+    local nf="${RED}檢測失敗${PLAIN}"
     local code=$(curl -${type}fsL -A "$ua" -w "%{http_code}" -o /dev/null -m 5 "https://www.netflix.com/title/70143836" 2>/dev/null)
     case "$code" in
-        200) nf_status="${GREEN}完整解鎖 (非自製劇)${PLAIN}" ;;
-        404) nf_status="${YELLOW}僅自製劇${PLAIN}" ;;
-        403) nf_status="${RED}無法觀看${PLAIN}" ;;
-        000) nf_status="${RED}連接失敗${PLAIN}" ;;
+        200) nf="${GREEN}完整解鎖 (非自製劇)${PLAIN}" ;;
+        404) nf="${YELLOW}僅自製劇${PLAIN}" ;;
+        403) nf="${RED}無權限/被封鎖${PLAIN}" ;;
+        000) nf="${RED}網絡連接失敗${PLAIN}" ;;
     esac
 
-    # ChatGPT 檢測
-    local gpt_status="${RED}檢測失敗${PLAIN}"
+    # ChatGPT
+    local gpt="${RED}檢測失敗${PLAIN}"
     local gpt_ret=$(curl -${type}fsL -A "$ua" -m 5 "https://ios.chat.openai.com/public-api/mobile/server_status/v1" 2>/dev/null)
     if [[ "$gpt_ret" == *'"status":"normal"'* ]]; then
-        gpt_status="${GREEN}APP+Web 解鎖${PLAIN}"
+        gpt="${GREEN}APP+Web 全解鎖${PLAIN}"
     elif [[ -n "$gpt_ret" ]]; then
-        gpt_status="${YELLOW}僅 Web 解鎖${PLAIN}"
+        gpt="${YELLOW}僅 Web 解鎖${PLAIN}"
     else
-        gpt_status="${RED}無法訪問${PLAIN}"
+        gpt="${RED}無法訪問${PLAIN}"
     fi
 
-    echo -e " Netflix: $nf_status"
-    echo -e " ChatGPT: $gpt_status"
+    echo -e " Netflix: $nf"
+    echo -e " ChatGPT: $gpt"
+    echo -e "\n按回車鍵返回菜單..."
+    read
+    menu
 }
 
-show_full_status() {
-    echo -e "\n${BLUE}--- 網絡連接與解鎖狀態 ---${PLAIN}"
-    local v4=$(curl -s4m5 https://ip.gs -k)
-    local v6=$(curl -s6m5 https://ip.gs -k)
+# 基礎狀態顯示
+show_status_basic() {
+    echo -e "\n${BLUE}--- 網絡狀態 ---${PLAIN}"
+    local v4=$(curl -s4m2 https://ip.gs -k)
+    local v6=$(curl -s6m2 https://ip.gs -k)
     local warp_status=$(curl -s https://www.cloudflare.com/cdn-cgi/trace -k | grep warp | cut -d= -f2)
 
     if [[ -n "$v4" ]]; then
-        local loc=$(curl -s4m5 http://ip-api.com/json/$v4?lang=zh-CN -k | grep '"country":' | cut -d'"' -f4)
+        local loc=$(curl -s4m2 http://ip-api.com/json/$v4?lang=zh-CN -k | grep '"country":' | cut -d'"' -f4)
         echo -e " IPv4: ${GREEN}$v4${PLAIN} ($loc)"
-        check_unlock_status 4
     else
         echo -e " IPv4: ${RED}無連接${PLAIN}"
     fi
-    echo "--------------------------------"
+    
     if [[ -n "$v6" ]]; then
-        local loc=$(curl -s6m5 http://ip-api.com/json/$v6?lang=zh-CN -k | grep '"country":' | cut -d'"' -f4)
+        local loc=$(curl -s6m2 http://ip-api.com/json/$v6?lang=zh-CN -k | grep '"country":' | cut -d'"' -f4)
         echo -e " IPv6: ${GREEN}$v6${PLAIN} ($loc)"
-        check_unlock_status 6
     else
         echo -e " IPv6: ${RED}無連接${PLAIN}"
     fi
-    echo "--------------------------------"
-    
+
     local s_run="${RED}未運行${PLAIN}"
     [[ "$warp_status" == "on" || "$warp_status" == "plus" ]] && s_run="${GREEN}運行中 ($warp_status)${PLAIN}"
-    echo -e " WARP 狀態: $s_run"
-    echo ""
+    echo -e " WARP: $s_run"
+    echo "----------------"
 }
 
-# --- 4. Systemd 守護與自動任務 ---
+# --- 4. 核心安裝 ---
 
 setup_systemd_monitor() {
     local restart_cmd="$1"
-    
-    # 1. 創建監測腳本
     cat > "/usr/local/bin/warp-check.sh" <<EOF
 #!/bin/bash
-# 如果無法訪問 Cloudflare Trace，則重啟服務
 if ! curl -s --max-time 3 https://www.cloudflare.com/cdn-cgi/trace | grep -q "warp=on"; then
     $restart_cmd
 fi
 EOF
     chmod +x "/usr/local/bin/warp-check.sh"
-
-    # 2. 創建監測服務與定時器 (每分鐘)
+    
+    # Monitor Service
     cat > "/etc/systemd/system/${SVC_MONITOR}.service" <<EOF
 [Unit]
-Description=WARP Connectivity Monitor
+Description=WARP Monitor
 [Service]
 Type=oneshot
 ExecStart=/usr/local/bin/warp-check.sh
 EOF
     cat > "/etc/systemd/system/${SVC_MONITOR}.timer" <<EOF
 [Unit]
-Description=Run WARP Monitor every minute
+Description=WARP Monitor Timer
 [Timer]
 OnBootSec=2min
 OnUnitActiveSec=1min
@@ -224,7 +246,7 @@ Unit=${SVC_MONITOR}.service
 WantedBy=timers.target
 EOF
 
-    # 3. 創建每日自動重啟定時器 (原腳本功能 15)
+    # Daily Restart
     cat > "/etc/systemd/system/${SVC_RESTART}.service" <<EOF
 [Unit]
 Description=Daily WARP Restart
@@ -241,21 +263,17 @@ Unit=${SVC_RESTART}.service
 [Install]
 WantedBy=timers.target
 EOF
-
     systemctl daemon-reload
     systemctl enable --now ${SVC_MONITOR}.timer
     systemctl enable --now ${SVC_RESTART}.timer
 }
 
-# --- 5. 核心安裝邏輯 (WARP-GO & WGCF) ---
-
-# 安裝 WARP-GO (方案一 A)
 install_warp_go() {
     uninstall_all_silent
-    download_file "${F_WARP_GO}" "$WARP_GO_BIN" "$REPO_WARP_GO/${F_WARP_GO}"
+    download_file "$BIN_WARP_GO" "$WARP_GO_BIN"
     
     if [[ ! -f "$WARP_GO_CONF" ]]; then
-        log_info "註冊 WARP-GO 帳戶..."
+        log_info "註冊 WARP-GO..."
         mkdir -p $(dirname "$WARP_GO_CONF")
         cat > "$WARP_GO_CONF" <<EOF
 [Account]
@@ -269,8 +287,6 @@ AllowedIPs = 0.0.0.0/0
 KeepAlive = 30
 EOF
         "$WARP_GO_BIN" --register --config="$WARP_GO_CONF"
-        # 嘗試自動應用 WARP+ (如果之前有備份)
-        auto_apply_warp_plus "$WARP_GO_BIN" "--config=$WARP_GO_CONF"
     fi
     
     local mode=$1
@@ -281,7 +297,7 @@ EOF
         "dual") ips="0.0.0.0/0,::/0" ;;
     esac
     sed -i "s#AllowedIPs = .*#AllowedIPs = $ips#g" "$WARP_GO_CONF"
-
+    
     cat > "/etc/systemd/system/${SVC_GO}.service" <<EOF
 [Unit]
 Description=Cloudflare WARP-GO
@@ -294,30 +310,25 @@ RestartSec=5
 [Install]
 WantedBy=multi-user.target
 EOF
-
     systemctl daemon-reload
     systemctl enable --now ${SVC_GO}
     setup_systemd_monitor "systemctl restart ${SVC_GO}"
     
-    log_info "WARP-GO 安裝完成 (模式: $mode)。"
-    show_full_status
+    log_info "WARP-GO 安裝完成。"
+    show_status_basic
 }
 
-# 安裝 WGCF (方案一 B)
 install_wgcf() {
     uninstall_all_silent
-    install_pkg "wireguard-tools"
-    download_file "${F_WGCF}" "$WGCF_BIN" "$REPO_WGCF/${F_WGCF}"
+    download_file "$BIN_WGCF" "$WGCF_BIN"
     
     mkdir -p "$WGCF_DIR"
     cd "$WGCF_DIR" || exit 1
-    
     if [[ ! -f wgcf-account.toml ]]; then
-        log_info "註冊 WGCF 帳戶..."
+        log_info "註冊 WGCF..."
         yes | "$WGCF_BIN" register
         "$WGCF_BIN" generate
     fi
-    
     cp -f wgcf-profile.conf wgcf.conf
     sed -i "s/engage.cloudflareclient.com:2408/162.159.192.1:2408/g" wgcf.conf
     
@@ -334,14 +345,12 @@ install_wgcf() {
     setup_systemd_monitor "systemctl restart wg-quick@wgcf"
     
     log_info "WGCF 模式已啟動。"
-    show_full_status
+    show_status_basic
 }
 
-# 安裝 Socks5 (方案二)
 install_socks5() {
     uninstall_all_silent
-    log_info "安裝官方 WARP-CLI (Socks5)..."
-    
+    log_info "安裝 Socks5 WARP-CLI..."
     if [[ "$PM" == "apt" ]]; then
         curl -fsSL https://pkg.cloudflareclient.com/pubkey.gpg | gpg --yes --dearmor --output /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg
         echo "deb [signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] https://pkg.cloudflareclient.com/ $(lsb_release -cs) main" | tee /etc/apt/sources.list.d/cloudflare-client.list
@@ -350,31 +359,24 @@ install_socks5() {
         rpm -ivh https://pkg.cloudflareclient.com/cloudflare-release-el8.rpm
         yum install -y cloudflare-warp
     fi
-    
     warp-cli --accept-tos register
     warp-cli --accept-tos mode proxy
-    readp "請輸入 Socks5 端口 (默認 40000): " port
+    readp "設置端口 (默認 40000): " port
     port=${port:-40000}
     warp-cli --accept-tos proxy port $port
     warp-cli --accept-tos connect
-    
-    log_info "Socks5 代理已在端口 $port 啟動。"
+    log_info "Socks5 代理已啟動: 127.0.0.1:$port"
 }
 
-# --- 6. 高級功能工具集 (Advanced Tools) ---
+# --- 5. 高級工具 ---
 
-# 自動優選 IP (功能 13)
 optimize_endpoint() {
-    log_info "正在下載並運行 Endpoint 優選腳本..."
-    download_file "warp_endpoint" "$PATH_ENDPOINT" "$REPO_TOOLS/warp_endpoint"
-    
-    # 運行 badafans 的腳本
+    log_info "正在運行 Endpoint 優選..."
+    download_file "$BIN_ENDPOINT" "$PATH_ENDPOINT"
     bash "$PATH_ENDPOINT"
     
-    # 腳本運行完後，提示用戶輸入結果
-    log_info "優選結束。請根據上方結果輸入最優 IP:Port。"
-    readp "輸入 Endpoint (例如 162.159.192.10:2408): " new_ep
-    
+    log_info "優選結束。請將上方最優 IP:Port 填入。"
+    readp "輸入 Endpoint (留空不修改): " new_ep
     if [[ -n "$new_ep" ]]; then
         if [[ -f "$WARP_GO_CONF" ]]; then
             sed -i "s/Endpoint = .*/Endpoint = $new_ep/" "$WARP_GO_CONF"
@@ -383,56 +385,38 @@ optimize_endpoint() {
             sed -i "s/Endpoint = .*/Endpoint = $new_ep/" "$WGCF_CONF"
             systemctl restart ${SVC_WGCF}
         fi
-        log_info "Endpoint 已更新為 $new_ep"
-    else
-        log_warn "未輸入，保持原樣。"
+        log_info "Endpoint 已更新。"
     fi
 }
 
-# 刷 WARP+ 流量 (功能 4, 17)
-run_warp_plus_tool() {
-    log_info "正在下載 WARP+ 流量生成工具..."
-    download_file "$F_WARP_PLUS" "$WARP_PLUS_BIN" "$REPO_TOOLS/$F_WARP_PLUS"
+manage_account() {
+    echo -e "${YELLOW}1. 刷 WARP+ 流量${PLAIN}"
+    echo -e "${YELLOW}2. 應用 WARP+ Key${PLAIN}"
+    echo -e "${YELLOW}3. 應用 Teams Token${PLAIN}"
+    readp "選擇: " sub
     
-    local id=""
-    # 嘗試自動獲取 ID
-    if [[ -f "$WARP_GO_CONF" ]]; then
-        id=$(grep "Device" "$WARP_GO_CONF" | awk '{print $3}')
-    fi
-    
-    echo -e "當前設備 ID: ${GREEN}${id:-未知}${PLAIN}"
-    readp "請輸入 WARP ID (回車使用當前 ID): " input_id
-    [[ -n "$input_id" ]] && id="$input_id"
-    
-    if [[ -n "$id" ]]; then
-        "$WARP_PLUS_BIN" --id "$id"
-    else
-        "$WARP_PLUS_BIN"
-    fi
-}
-
-# 帳戶升級 (功能 5, 6)
-upgrade_account() {
-    echo -e "${YELLOW}1. 升級 WARP+ (密鑰)${PLAIN}"
-    echo -e "${YELLOW}2. 升級 Teams (Token)${PLAIN}"
-    readp "請選擇: " sub
-    
-    if command -v warp-go &>/dev/null; then
-        if [[ "$sub" == "1" ]]; then
-            readp "輸入 WARP+ 密鑰: " key
-            warp-go --update --config="$WARP_GO_CONF" --license="$key"
-        elif [[ "$sub" == "2" ]]; then
-            readp "輸入 Teams Token: " token
-            warp-go --register --config="$WARP_GO_CONF" --team-config="$token"
+    if [[ "$sub" == "1" ]]; then
+        download_file "$BIN_WARP_PLUS" "$PATH_WARP_PLUS"
+        readp "輸入 ID (保留為空自動讀取配置): " id
+        if [[ -z "$id" && -f "$WARP_GO_CONF" ]]; then
+             id=$(grep "Device" "$WARP_GO_CONF" | awk '{print $3}')
         fi
-        systemctl restart ${SVC_GO}
-        show_full_status
-    else
-        log_error "當前僅支持 WARP-GO 內核升級。"
+        [[ -n "$id" ]] && "$PATH_WARP_PLUS" --id "$id" || "$PATH_WARP_PLUS"
+    elif [[ "$sub" == "2" ]]; then
+        readp "輸入 Key: " key
+        if command -v warp-go &>/dev/null; then
+            warp-go --update --config="$WARP_GO_CONF" --license="$key"
+            systemctl restart ${SVC_GO}
+        fi
+    elif [[ "$sub" == "3" ]]; then
+        readp "輸入 Token: " token
+        if command -v warp-go &>/dev/null; then
+            warp-go --register --config="$WARP_GO_CONF" --team-config="$token"
+            systemctl restart ${SVC_GO}
+        fi
     fi
 }
 
-# 內部卸載
 uninstall_all_silent() {
     systemctl stop ${SVC_GO} ${SVC_WGCF} ${SVC_MONITOR}.timer ${SVC_RESTART}.timer >/dev/null 2>&1
     systemctl disable ${SVC_GO} ${SVC_WGCF} ${SVC_MONITOR}.timer ${SVC_RESTART}.timer >/dev/null 2>&1
@@ -448,33 +432,40 @@ uninstall_full() {
     log_info "已徹底卸載。"
 }
 
-# --- 7. 菜單界面 ---
+# --- 6. 主菜單 ---
 
 menu() {
     clear
     echo -e "${BLUE}=========================================================${PLAIN}"
-    echo -e "${BLUE}   CFwarp Ultimate (Enterprise) - 100% Functional Parity ${PLAIN}"
+    echo -e "${BLUE}   CFwarp Ultimate (Self-Hosted & Production Grade)      ${PLAIN}"
     echo -e "${BLUE}=========================================================${PLAIN}"
     echo -e "${YELLOW}方案一：WARP 系統接管 (推薦 WARP-GO)${PLAIN}"
     echo -e "  1. 安裝/切換 WARP-GO (IPv4)"
     echo -e "  2. 安裝/切換 WARP-GO (IPv6)"
     echo -e "  3. 安裝/切換 WARP-GO (雙棧)"
     echo -e "  -----------------------------"
-    echo -e "  4. 安裝/切換 WGCF    (IPv4)"
-    echo -e "  5. 安裝/切換 WGCF    (IPv6)"
-    echo -e "  6. 安裝/切換 WGCF    (雙棧)"
-    echo -e "${YELLOW}方案二：Socks5 代理${PLAIN}"
+    echo -e "  4. 安裝/切換 WGCF (IPv4)"
+    echo -e "  5. 安裝/切換 WGCF (IPv6)"
+    echo -e "  6. 安裝/切換 WGCF (雙棧)"
+    echo -e "${YELLOW}方案二：本地代理 (Socks5)${PLAIN}"
     echo -e "  7. 安裝 Socks5-WARP (官方客戶端)"
     echo -e "${YELLOW}高級工具與維護${PLAIN}"
-    echo -e "  8. 顯示詳細狀態 (含 Netflix/ChatGPT 檢測)"
-    echo -e "  9. 優選 Endpoint IP (自動/手動)"
-    echo -e " 10. 刷 WARP+ 流量 / 帳戶升級 (Teams)"
+    echo -e "  8. 優選 Endpoint IP (優化速度)"
+    echo -e "  9. 賬戶管理 (刷流量 / 升級 Teams)"
+    echo -e " 10. 媒體解鎖檢測 (Netflix/ChatGPT)"
     echo -e " 11. 暫停 / 開啟服務"
-    echo -e " 12. 卸載腳本與服務"
+    echo -e " 12. 徹底卸載"
     echo -e "  0. 退出"
     echo -e "---------------------------------------------------------"
     
-    readp "請選擇: " num
+    if [[ -f "$WARP_GO_CONF" || -f "$WGCF_CONF" ]]; then
+        echo -e "當前狀態: ${GREEN}已安裝${PLAIN}"
+    else
+        echo -e "當前狀態: ${RED}未安裝${PLAIN}"
+    fi
+    echo ""
+    
+    readp "請輸入選項: " num
     case "$num" in
         1) install_warp_go "ipv4" ;;
         2) install_warp_go "ipv6" ;;
@@ -483,15 +474,10 @@ menu() {
         5) install_wgcf "ipv6" ;;
         6) install_wgcf "dual" ;;
         7) install_socks5 ;;
-        8) show_full_status ;;
-        9) optimize_endpoint ;;
-        10) 
-             echo -e "1. 刷流量 (WARP+)\n2. 帳戶升級"
-             readp "選擇: " sub
-             [[ "$sub" == "1" ]] && run_warp_plus_tool
-             [[ "$sub" == "2" ]] && upgrade_account
-             ;;
-        11)
+        8) optimize_endpoint ;;
+        9) manage_account ;;
+        10) check_streaming_unlock ;; 
+        11) 
              readp "1.暫停 2.開啟: " act
              [[ "$act" == "1" ]] && uninstall_all_silent && log_info "服務已暫停"
              [[ "$act" == "2" ]] && systemctl start ${SVC_GO} 2>/dev/null || systemctl start wg-quick@wgcf 2>/dev/null && log_info "服務已開啟"
@@ -505,19 +491,17 @@ menu() {
 # --- Entry Point ---
 check_root
 detect_system
-install_base_deps
-create_shortcut
+check_dependencies
 enable_tun
+install_shortcut
 
 if [[ $# == 0 ]]; then
-    # 默認啟動模式：顯示狀態後進入菜單
-    show_full_status
+    show_status_basic
     menu
 else
-    # 命令行參數模式 (方便自動化調用)
     case "$1" in
         install) install_warp_go "dual" ;;
         uninstall) uninstall_full ;;
-        status) show_full_status ;;
+        status) show_status_basic ;;
     esac
 fi
