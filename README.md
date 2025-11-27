@@ -1,4 +1,4 @@
-# CFwarp Ultimate - Enterprise Edition
+# CFwarp Ultimate （開發中）
 
 [![Build Status](https://img.shields.io/github/last-commit/Yat-Muk/CFwarp-Pro)](https://github.com/Yat-Muk/CFwarp-Pro)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
